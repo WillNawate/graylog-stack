@@ -1,0 +1,112 @@
+version: '3.5'
+
+services:
+  mongodb:
+    image: mongo:4.2-bionic
+    container_name: mongo-db
+    restart: unless-stopped
+    env_file:
+     - ./env/.env_mongodb
+    secrets:
+     - DB_USER
+     - DB_PASS
+    volumes:
+     - /etc/localtime:/etc/localtime:ro
+     - /etc/timezone:/etc/timezone:ro
+     - mongodb_dir:/data/db
+    networks:
+      graylog_backend:
+        aliases:
+         - mongodb
+    stop_grace_period: 30s
+
+  elastic:
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.0
+    container_name: elasticsearch
+    restart: unless-stopped
+    volumes:
+     - /etc/localtime:/etc/localtime:ro
+     - /etc/timezone:/etc/timezone:ro
+     - elastic_dir:/usr/share/elasticsearch/data
+    environment:
+      - http.host=0.0.0.0
+      - node.name=es-graylog
+      - cluster.name=graylog
+      - transport.host=localhost
+      - network.host=0.0.0.0
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    # ulimits:
+    #   memlock:
+    #     soft: -1
+    #     hard: -1
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 1g
+    ports:
+      - 9200:9200
+    networks:
+      graylog_backend:
+        aliases:
+         - elasticsearch
+
+  graylog:
+    image: graylog/graylog:4.0
+    container_name: graylog
+    restart: unless-stopped
+    volumes:
+     - /etc/localtime:/etc/localtime:ro
+     - /etc/timezone:/etc/timezone:ro
+     - graylog_dir:/usr/share/graylog/data
+    env_file:
+     - ./env/.env_graylog
+    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+    networks:
+      graylog_backend:
+        aliases:
+         - graylog
+    depends_on:
+      - mongodb
+      - elastic
+    ports:
+      - ${WEB_PORT}:9000
+      - 514:514/udp
+      - 5141:5141/udp
+      - 5142:5142/udp
+      - 5143:5143/udp
+      - 5144:5144/udp
+      - 5150:5150/udp
+      - 5151:5151/udp
+      - 5153:5153/udp
+
+networks:
+  graylog_backend:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "false"
+
+volumes:
+  mongodb_dir:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${MONGODB_DIR}
+  elastic_dir:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${ELASTIC_DIR}
+  graylog_dir:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${GRAYLOG_DIR}
+
+secrets:
+  DB_USER:
+    file: ./secrets/.dbuser
+  DB_PASS:
+    file: ./secrets/.dbpass
